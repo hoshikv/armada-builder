@@ -143,29 +143,19 @@ jobs:
           
           make ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} olddefconfig
 
-      - name: Build kernel Image
+      - name: Build kernel Image and modules
         run: |
           cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
           
+          # Build kernel + all modules together (fixes symbol resolution)
           make -j$(nproc) ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
             LLVM=${{ env.LLVM }} LD=${{ env.LD }} \
             KCPPFLAGS="-Wno-error=unused-variable" \
-            Image
+            Image modules
           
           cp arch/arm64/boot/Image ${{ env.WORKSPACE }}/Image
-
-      - name: Build kernel modules
-        run: |
-          cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
           
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
-            LLVM=${{ env.LLVM }} LD=${{ env.LD }} \
-            M=drivers/gpu/drm/msm \
-            M=drivers/net/wireless/ath/ath11k \
-            M=drivers/input/touchscreen \
-            M=drivers/bluetooth \
-            modules
-          
+          # Install modules
           make ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
             INSTALL_MOD_PATH=${{ env.WORKSPACE }}/modules modules_install
           
