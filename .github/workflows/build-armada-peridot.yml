@@ -163,6 +163,14 @@ jobs:
           mkdir -p ${{ env.WORKSPACE }}/kernel-modules
           cp -r ${{ env.WORKSPACE }}/modules/lib/modules/$KVER/* ${{ env.WORKSPACE }}/kernel-modules/ 2>/dev/null || true
 
+      - name: Upload kernel artifact (early - save if later steps fail)
+        uses: actions/upload-artifact@v4
+        with:
+          name: armada-peridot-kernel
+          path: |
+            ${{ env.WORKSPACE }}/Image
+          retention-days: 30
+
       - name: Install kernel headers
         run: |
           cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
@@ -174,6 +182,10 @@ jobs:
           cd ${{ env.WORKSPACE }}
           
           cp -r ${WORKSPACE}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/ .
+          
+          # Fix DTS includes - use full paths
+          sed -i 's|#include "sm8635.dtsi"|#include "qcom/sm8635.dtsi"|' qcom/sm8635-peridot.dts
+          sed -i 's|#include "sm8635-peridot.dtsi"|#include "qcom/sm8635-peridot.dtsi"|' qcom/sm8635-peridot.dts
           
           dtc -I dts -O dtb -o peridot.dtb \
             qcom/sm8635-peridot.dts
@@ -268,7 +280,7 @@ jobs:
           
           cp peridot-media.img ${{ env.WORKSPACE }}/
 
-      - name: Upload artifacts
+      - name: Upload all artifacts
         uses: actions/upload-artifact@v4
         with:
           name: armada-peridot-build
