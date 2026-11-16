@@ -179,15 +179,21 @@ jobs:
 
       - name: Build Device Tree
         run: |
-          cd ${{ env.WORKSPACE }}
+          cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
           
-          cp -r ${WORKSPACE}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/ .
+          # Copy Peridot DTS files to kernel source tree
+          mkdir -p arch/arm64/boot/dts/qcom
+          cp -r ${WORKSPACE}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/
           
-          # Use -I flag to specify include path for DTS includes
-          dtc -I dts -O dtb -i qcom -o peridot.dtb \
-            qcom/sm8635-peridot.dts
+          # Build DTB from kernel source tree (has dt-bindings headers)
+          ./scripts/dtc/dtc -I dts -O dtb \
+            -i arch/arm64/boot/dts \
+            -i include \
+            -i arch/arm64/include \
+            -o ${WORKSPACE}/peridot.dtb \
+            arch/arm64/boot/dts/qcom/sm8635-peridot.dts
           
-          cp peridot.dtb ${{ env.WORKSPACE }}/
+          cp ${WORKSPACE}/peridot.dtb ${{ env.WORKSPACE }}/
 
       - name: Build initrd
         run: |
