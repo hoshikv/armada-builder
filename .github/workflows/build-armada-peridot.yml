@@ -183,11 +183,8 @@ jobs:
           
           cp -r ${WORKSPACE}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/ .
           
-          # Fix DTS includes - use full paths
-          sed -i 's|#include "sm8635.dtsi"|#include "qcom/sm8635.dtsi"|' qcom/sm8635-peridot.dts
-          sed -i 's|#include "sm8635-peridot.dtsi"|#include "qcom/sm8635-peridot.dtsi"|' qcom/sm8635-peridot.dts
-          
-          dtc -I dts -O dtb -o peridot.dtb \
+          # Use -I flag to specify include path for DTS includes
+          dtc -I dts -O dtb -i qcom -o peridot.dtb \
             qcom/sm8635-peridot.dts
           
           cp peridot.dtb ${{ env.WORKSPACE }}/
