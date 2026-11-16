@@ -1,0 +1,337 @@
+name: Build Armada-Dodge Peridot
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: 'Linux kernel version'
+        required: true
+        default: '6.12'
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - kernel-only
+          - modules-only
+          - dtb-only
+
+env:
+  WORKSPACE: ${{ github.workspace }}/peridot-workspace
+  KERNEL_VERSION: ${{ github.event.inputs.kernel_version || '6.12' }}
+  LLVM: /usr/bin
+  LD: /usr/bin/ld.lld
+  CROSS_COMPILE: aarch64-linux-gnu-
+  ARCH: arm64
+
+jobs:
+  build:
+    name: Build Armada-Dodge Peridot
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+
+    steps:
+      - name: Checkout armada-dodge-peridot
+        uses: actions/checkout@v4
+        with:
+          repository: hoshikv/armada-peridot
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: armada-dodge-peridot
+
+      - name: Checkout firmware
+        uses: actions/checkout@v4
+        with:
+          path: firmware
+
+      - name: Setup build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            dwarves \
+            python3 \
+            python3-venv \
+            git \
+            wget \
+            curl \
+            xz-utils \
+            cpio \
+            device-tree-compiler \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            llvm \
+            lld \
+            clang \
+            android-sdk-platform-tools-common
+
+      - name: Setup LLVM/Clang toolchain
+        run: |
+          echo "LLVM=/usr/bin" >> $GITHUB_ENV
+          echo "LD=/usr/bin/ld.lld" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          
+          # Verify toolchain
+          aarch64-linux-gnu-gcc --version
+          clang --version
+          ld.lld --version
+
+      - name: Create workspace directories
+        run: |
+          mkdir -p ${{ env.WORKSPACE }}/firmware
+          mkdir -p ${{ env.WORKSPACE }}/kernel-headers
+
+      - name: Copy firmware to workspace
+        run: |
+          cp -r firmware/* ${{ env.WORKSPACE }}/firmware/
+          ls -la ${{ env.WORKSPACE }}/firmware/
+
+      - name: Clone Linux kernel
+        run: |
+          cd ${{ env.WORKSPACE }}
+          git clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \
+            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-${{ env.KERNEL_VERSION }}
+
+      - name: Apply Peridot patches
+        run: |
+          cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
+          
+          # Apply GPU patch
+          if [ -f ../armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch ]; then
+            git apply ../armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch || echo "GPU patch may need manual apply"
+          fi
+          
+          # Apply other patches if they exist
+          for patch in ../armada-dodge-peridot/patches/armada/*.patch; do
+            [ -f "$patch" ] && git apply "$patch" 2>/dev/null || echo "Patch $(basename $patch) skipped"
+          done
+
+      - name: Configure kernel
+        run: |
+          cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
+          
+          make ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} defconfig
+          
+          cat <<EOF >> .config
+CONFIG_DRM_MSM=y
+CONFIG_DRM_MSM_ADRENO=y
+CONFIG_DRM_MSM_ADRENO_A7XX=y
+CONFIG_DRM_MSM_DSI=y
+CONFIG_DRM_MSM_DSI_DSC=y
+CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=y
+CONFIG_DRM_PANEL_XIAOMI_PERIDOT=m
+CONFIG_TOUCHSCREEN_GOODIX=m
+CONFIG_TOUCHSCREEN_GOODIX_SPI=m
+CONFIG_ATH11K=m
+CONFIG_ATH11K_PCI=m
+CONFIG_BT_HCIUART=m
+CONFIG_BT_HCIUART_H4=y
+CONFIG_BT_HCIUART_QCA=y
+CONFIG_BT_QCA=m
+CONFIG_QCOM_TSENS=y
+CONFIG_QCOM_SPMI_TEMP_ALARM=y
+CONFIG_QCOM_SCMI=y
+CONFIG_QCOM_CPR=y
+CONFIG_QCOM_RPMH=y
+CONFIG_QCOM_GDSC=y
+CONFIG_DEBUG_FS=y
+EOF
+          
+          make ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} olddefconfig
+
+      - name: Build kernel Image
+        run: |
+          cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
+          
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
+            LLVM=${{ env.LLVM }} LD=${{ env.LD }} \
+            KCPPFLAGS="-Wno-error=unused-variable" \
+            Image
+          
+          cp arch/arm64/boot/Image ${{ env.WORKSPACE }}/Image
+
+      - name: Build kernel modules
+        run: |
+          cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
+          
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
+            LLVM=${{ env.LLVM }} LD=${{ env.LD }} \
+            M=drivers/gpu/drm/msm \
+            M=drivers/net/wireless/ath/ath11k \
+            M=drivers/input/touchscreen \
+            M=drivers/bluetooth \
+            modules
+          
+          make ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
+            INSTALL_MOD_PATH=${{ env.WORKSPACE }}/modules modules_install
+          
+          # Copy built modules to workspace
+          KVER=$(ls ${{ env.WORKSPACE }}/modules/lib/modules/ | head -1)
+          cp -r ${{ env.WORKSPACE }}/modules/lib/modules/$KVER/* ${{ env.WORKSPACE }}/kernel-modules/ 2>/dev/null || true
+
+      - name: Install kernel headers
+        run: |
+          cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
+          make ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
+            INSTALL_HDR_PATH=${{ env.WORKSPACE }}/kernel-headers headers_install
+
+      - name: Build Device Tree
+        run: |
+          cd ${{ env.WORKSPACE }}
+          
+          # Copy DT sources
+          cp -r armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/ .
+          
+          # Compile DTB
+          dtc -I dts -O dtb -o peridot.dtb \
+            qcom/sm8635-peridot.dts
+          
+          cp peridot.dtb ${{ env.WORKSPACE }}/
+
+      - name: Build initrd
+        run: |
+          cd ${{ env.WORKSPACE }}
+          
+          INITRD_DIR=$(mktemp -d)
+          mkdir -p $INITRD_DIR/{bin,sbin,etc,lib,lib64,usr/bin,usr/sbin,usr/lib,usr/lib64,proc,sys,dev,run,thermal}
+          
+          # Copy thermal scripts
+          cp armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-guard.py $INITRD_DIR/thermal/
+          cp armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-watchdog.py $INITRD_DIR/thermal/
+          
+          # Copy kernel modules
+          KVER=$(ls modules/lib/modules/ | head -1)
+          cp -r modules/lib/modules/$KVER $INITRD_DIR/lib/modules/
+          
+          # Copy firmware
+          mkdir -p $INITRD_DIR/lib/firmware
+          cp -r firmware/* $INITRD_DIR/lib/firmware/
+          
+          # Create init script
+          cat > $INITRD_DIR/init <<'INITEOF'
+#!/bin/busybox sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+mount -t tmpfs none /run
+
+modprobe qcom_tsens
+modprobe qcom_spmi_temp_alarm
+
+/thermal/thermal-guard.py &
+/thermal/thermal-watchdog.py &
+
+modprobe msm_drm
+modprobe panel_xiaomi_peridot
+modprobe goodix
+modprobe ath11k_pci
+modprobe hci_uart
+modprobe qca
+
+exec /sbin/init
+INITEOF
+          chmod +x $INITRD_DIR/init
+          
+          # Create initrd
+          cd $INITRD_DIR
+          find . -print0 | cpio --null -ov --format=newc | gzip -9 > ${{ env.WORKSPACE }}/initrd.img
+
+      - name: Build FAT media image
+        run: |
+          cd ${{ env.WORKSPACE }}
+          
+          # Create staging directory
+          STAGE_DIR=$(mktemp -d)
+          
+          # Create directory structure
+          for d in boot modules firmware armada arch steam thermal; do
+            mkdir -p $STAGE_DIR/$d
+          done
+          
+          # Copy boot files
+          cp Image $STAGE_DIR/boot/
+          cp initrd.img $STAGE_DIR/boot/
+          cp peridot.dtb $STAGE_DIR/boot/
+          
+          # Copy kernel modules
+          KVER=$(ls modules/lib/modules/ | head -1)
+          cp -r modules/lib/modules/$KVER/* $STAGE_DIR/modules/
+          
+          # Copy firmware
+          cp -r firmware/* $STAGE_DIR/firmware/
+          
+          # Create boot config
+          cat > $STAGE_DIR/boot/boot.conf <<BOOTEOF
+# Peridot Armada Boot Configuration
+KERNEL=Image
+INITRD=initrd.img
+DTB=peridot.dtb
+BOOTARGS=console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0x888000 bootcpu=7 cpus=8 cpufreq=1 fb_hz=120 fb_threads=6 touch_no_rpmh=1 touch_poll_us=4000 thermal=2 metal=1
+BOOTEOF
+          
+          # Copy thermal scripts
+          cp -r armada-dodge-peridot/experimental/peridot-thermal-v1/* $STAGE_DIR/thermal/
+          
+          # Create FAT32 image (2GB)
+          MEDIA_SIZE_MB=2048
+          SECTOR_SIZE=512
+          sectors=$((MEDIA_SIZE_MB * 1024 * 1024 / SECTOR_SIZE))
+          
+          dd if=/dev/zero of=peridot-media.img bs=$SECTOR_SIZE count=$sectors
+          mkfs.vfat -F 32 -n PERIDOT peridot-media.img
+          
+          # Mount and copy
+          MNT_DIR=$(mktemp -d)
+          sudo mount -o loop,uid=1000,gid=1000 peridot-media.img $MNT_DIR
+          cp -r $STAGE_DIR/* $MNT_DIR/
+          sudo umount $MNT_DIR
+          
+          cp peridot-media.img ${{ env.WORKSPACE }}/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: armada-peridot-build
+          path: |
+            ${{ env.WORKSPACE }}/Image
+            ${{ env.WORKSPACE }}/initrd.img
+            ${{ env.WORKSPACE }}/peridot.dtb
+            ${{ env.WORKSPACE }}/peridot-media.img
+          retention-days: 30
+
+      - name: Create release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: armada-peridot-${{ github.run_number }}
+          name: "Armada-Dodge Peridot Build #${{ github.run_number }}"
+          body: |
+            Build artifacts for Xiaomi Peridot (POCO F6 / Redmi Turbo 3) - SM8635
+            
+            Kernel: Linux ${{ env.KERNEL_VERSION }}
+            Build: ${{ github.run_number }}
+            Date: ${{ github.event.head_commit.timestamp }}
+            
+            Artifacts:
+            - Image (Kernel)
+            - initrd.img (Initramfs with thermal guard)
+            - peridot.dtb (Device tree)
+            - peridot-media.img (2GB FAT32 media with userspace)
+          files: |
+            ${{ env.WORKSPACE }}/Image
+            ${{ env.WORKSPACE }}/initrd.img
+            ${{ env.WORKSPACE }}/peridot.dtb
+            ${{ env.WORKSPACE }}/peridot-media.img
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
