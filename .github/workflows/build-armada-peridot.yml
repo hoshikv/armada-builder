@@ -1,6 +1,8 @@
 name: Build Armada-Dodge Peridot
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       kernel_version:
