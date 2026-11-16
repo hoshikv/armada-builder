@@ -37,7 +37,7 @@ jobs:
         with:
           repository: hoshikv/armada-peridot
           token: ${{ secrets.GITHUB_TOKEN }}
-          path: armada-dodge-peridot
+          path: ${{ env.WORKSPACE }}/armada-dodge-peridot
 
       - name: Checkout firmware
         uses: actions/checkout@v4
@@ -101,11 +101,11 @@ jobs:
         run: |
           cd ${{ env.WORKSPACE }}/linux-${{ env.KERNEL_VERSION }}
           
-          if [ -f ../armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch ]; then
-            git apply ../armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch || echo "GPU patch may need manual apply"
+          if [ -f ${WORKSPACE}/armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch ]; then
+            git apply ${WORKSPACE}/armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch || echo "GPU patch may need manual apply"
           fi
           
-          for patch in ../armada-dodge-peridot/patches/armada/*.patch; do
+          for patch in ${WORKSPACE}/armada-dodge-peridot/patches/armada/*.patch; do
             [ -f "$patch" ] && git apply "$patch" 2>/dev/null || echo "Patch $(basename $patch) skipped"
           done
 
@@ -173,7 +173,7 @@ jobs:
         run: |
           cd ${{ env.WORKSPACE }}
           
-          cp -r armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/ .
+          cp -r ${WORKSPACE}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/ .
           
           dtc -I dts -O dtb -o peridot.dtb \
             qcom/sm8635-peridot.dts
@@ -187,8 +187,8 @@ jobs:
           INITRD_DIR=$(mktemp -d)
           mkdir -p $INITRD_DIR/{bin,sbin,etc,lib,lib64,usr/bin,usr/sbin,usr/lib,usr/lib64,proc,sys,dev,run,thermal}
           
-          cp armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-guard.py $INITRD_DIR/thermal/
-          cp armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-watchdog.py $INITRD_DIR/thermal/
+          cp ${WORKSPACE}/armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-guard.py $INITRD_DIR/thermal/
+          cp ${WORKSPACE}/armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-watchdog.py $INITRD_DIR/thermal/
           
           KVER=$(ls modules/lib/modules/ | head -1)
           cp -r modules/lib/modules/$KVER $INITRD_DIR/lib/modules/
@@ -252,7 +252,7 @@ jobs:
             "BOOTARGS=console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0x888000 bootcpu=7 cpus=8 cpufreq=1 fb_hz=120 fb_threads=6 touch_no_rpmh=1 touch_poll_us=4000 thermal=2 metal=1" \
             > $STAGE_DIR/boot/boot.conf
           
-          cp -r armada-dodge-peridot/experimental/peridot-thermal-v1/* $STAGE_DIR/thermal/
+          cp -r ${WORKSPACE}/armada-dodge-peridot/experimental/peridot-thermal-v1/* $STAGE_DIR/thermal/
           
           MEDIA_SIZE_MB=2048
           SECTOR_SIZE=512
