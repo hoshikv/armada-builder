@@ -8,15 +8,9 @@ on:
         required: true
         default: '6.12'
       build_type:
-        description: 'Build type'
+        description: 'Build type (full, kernel-only, modules-only, dtb-only)'
         required: true
         default: 'full'
-        type: choice
-        options:
-          - full
-          - kernel-only
-          - modules-only
-          - dtb-only
 
 env:
   WORKSPACE: ${{ github.workspace }}/peridot-workspace
