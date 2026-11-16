@@ -185,13 +185,16 @@ jobs:
           mkdir -p arch/arm64/boot/dts/qcom
           cp -r ${WORKSPACE}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/
           
-          # Build DTB from kernel source tree (has dt-bindings headers)
-          ./scripts/dtc/dtc -I dts -O dtb \
-            -i arch/arm64/boot/dts \
-            -i include \
-            -i arch/arm64/include \
-            -o ${WORKSPACE}/peridot.dtb \
-            arch/arm64/boot/dts/qcom/sm8635-peridot.dts
+          # Verify files copied
+          ls -la arch/arm64/boot/dts/qcom/
+          
+          # Build DTB using kernel's build system (handles includes properly)
+          make ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
+            LLVM=${{ env.LLVM }} LD=${{ env.LD }} \
+            dtbs
+          
+          # Copy the built DTB
+          cp arch/arm64/boot/dts/qcom/sm8635-peridot.dtb ${WORKSPACE}/peridot.dtb
           
           cp ${WORKSPACE}/peridot.dtb ${{ env.WORKSPACE }}/
 
