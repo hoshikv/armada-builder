@@ -188,10 +188,10 @@ jobs:
           # Verify files copied
           ls -la arch/arm64/boot/dts/qcom/
           
-          # Build DTB using kernel's build system (handles includes properly)
+          # Build specific DTB for Peridot (not in default dtbs list)
           make ARCH=arm64 CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
             LLVM=${{ env.LLVM }} LD=${{ env.LD }} \
-            dtbs
+            sm8635-peridot.dtb
           
           # Copy the built DTB
           cp arch/arm64/boot/dts/qcom/sm8635-peridot.dtb ${WORKSPACE}/peridot.dtb
