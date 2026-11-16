@@ -1,17 +1,14 @@
 name: Build Peridot Initrd & Media (Skip Kernel)
-
-on:
+'on':
   workflow_dispatch:
     inputs:
       kernel_artifact_name:
-        description: 'Name of kernel artifact to download'
+        description: Name of kernel artifact to download
         required: true
-        default: 'armada-peridot-kernel'
-
+        default: armada-peridot-kernel
 env:
   WORKSPACE: ${{ github.workspace }}/peridot-workspace
   KERNEL_VERSION: '6.12'
-
 jobs:
   build-initrd-media:
     name: Build Initrd & FAT Media
@@ -20,281 +17,131 @@ jobs:
     permissions:
       contents: write
       packages: write
-
     steps:
-      - name: Checkout armada-dodge-peridot
-        uses: actions/checkout@v4
-        with:
-          repository: hoshikv/armada-peridot
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: ${{ env.WORKSPACE }}/armada-dodge-peridot
+    - name: Checkout armada-dodge-peridot
+      uses: actions/checkout@v4
+      with:
+        repository: hoshikv/armada-peridot
+        token: ${{ secrets.GITHUB_TOKEN }}
+        path: ${{ env.WORKSPACE }}/armada-dodge-peridot
+    - name: Checkout firmware
+      uses: actions/checkout@v4
+      with:
+        path: firmware
+    - name: Download kernel artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ github.event.inputs.kernel_artifact_name }}
+        path: ${{ env.WORKSPACE }}
+    - name: Verify kernel artifact
+      run: 'ls -la ${{ env.WORKSPACE }}/
 
-      - name: Checkout firmware
-        uses: actions/checkout@v4
-        with:
-          path: firmware
+        test -f ${{ env.WORKSPACE }}/Image'
+    - name: Setup build environment
+      run: "sudo apt-get update\nsudo apt-get install -y \\\n  build-essential \\\n  bc \\\n  bison \\\n  flex \\\n  libssl-dev\
+        \ \\\n  libelf-dev \\\n  dwarves \\\n  python3 \\\n  python3-venv \\\n  git \\\n  wget \\\n  curl \\\n  xz-utils \\\
+        \n  cpio \\\n  device-tree-compiler \\\n  gcc-aarch64-linux-gnu \\\n  g++-aarch64-linux-gnu \\\n  llvm \\\n  lld \\\
+        \n  clang \\\n  android-sdk-platform-tools-common"
+    - name: Create workspace directories
+      run: 'mkdir -p ${{ env.WORKSPACE }}/firmware
 
-      - name: Download kernel artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ github.event.inputs.kernel_artifact_name }}
-          path: ${{ env.WORKSPACE }}
+        mkdir -p ${{ env.WORKSPACE }}/kernel-headers'
+    - name: Copy firmware to workspace
+      run: 'cp -r firmware/* ${{ env.WORKSPACE }}/firmware/
 
-      - name: Verify kernel artifact
-        run: |
-          ls -la ${{ env.WORKSPACE }}/
-          test -f ${{ env.WORKSPACE }}/Image
+        ls -la ${{ env.WORKSPACE }}/firmware/'
+    - name: Download kernel modules artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: armada-peridot-build
+        path: ${{ env.WORKSPACE }}/artifacts
+      continue-on-error: true
+    - name: Extract kernel modules if available
+      run: "if [ -d \"${{ env.WORKSPACE }}/artifacts/lib/modules\" ]; then\n  cp -r ${{ env.WORKSPACE }}/artifacts/lib/modules/*\
+        \ ${{ env.WORKSPACE }}/\nelif [ -d \"${{ env.WORKSPACE }}/artifacts/modules\" ]; then\n  cp -r ${{ env.WORKSPACE }}/artifacts/modules/*\
+        \ ${{ env.WORKSPACE }}/ \nelse\n  echo \"No pre-built modules found, will need to build them\"\nfi"
+    - name: Build kernel modules (if needed)
+      if: ${{ !exists('${{ env.WORKSPACE }}/modules') }}
+      run: "cd ${{ env.WORKSPACE }}\ngit clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \\\n  https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git\
+        \ linux-${{ env.KERNEL_VERSION }}\ncd linux-${{ env.KERNEL_VERSION }}\n\n# Apply Peridot patches\nif [ -f ../${{ env.WORKSPACE\
+        \ }}/armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch ]; then\n  git apply ../${{ env.WORKSPACE\
+        \ }}/armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch || echo \"GPU patch may need manual\
+        \ apply\"\nfi\n\nfor patch in ../${{ env.WORKSPACE }}/armada-dodge-peridot/patches/armada/*.patch; do\n  [ -f \"$patch\"\
+        \ ] && git apply \"$patch\" 2>/dev/null || echo \"Patch $(basename $patch) skipped\"\ndone\n\n# Configure and build\
+        \ modules\nmake ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \\\n  LLVM=/usr/bin LD=/usr/bin/ld.lld \\\n  defconfig\n\
+        \n# Use printf to avoid heredoc issues\nprintf \"%s\\n\" \\\n  \"CONFIG_DRM_MSM=y\" \\\n  \"CONFIG_DRM_MSM_ADRENO=y\"\
+        \ \\\n  \"CONFIG_DRM_MSM_ADRENO_A7XX=y\" \\\n  \"CONFIG_DRM_MSM_DSI=y\" \\\n  \"CONFIG_DRM_MSM_DSI_DSC=y\" \\\n  \"\
+        CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=y\" \\\n  \"CONFIG_DRM_PANEL_XIAOMI_PERIDOT=m\" \\\n  \"CONFIG_TOUCHSCREEN_GOODIX=m\"\
+        \ \\\n  \"CONFIG_TOUCHSCREEN_GOODIX_SPI=m\" \\\n  \"CONFIG_ATH11K=m\" \\\n  \"CONFIG_ATH11K_PCI=m\" \\\n  \"CONFIG_BT_HCIUART=m\"\
+        \ \\\n  \"CONFIG_BT_HCIUART_H4=y\" \\\n  \"CONFIG_BT_HCIUART_QCA=y\" \\\n  \"CONFIG_BT_QCA=m\" \\\n  \"CONFIG_QCOM_TSENS=y\"\
+        \ \\\n  \"CONFIG_QCOM_SPMI_TEMP_ALARM=y\" \\\n  \"CONFIG_QCOM_SCMI=y\" \\\n  \"CONFIG_QCOM_CPR=y\" \\\n  \"CONFIG_QCOM_RPMH=y\"\
+        \ \\\n  \"CONFIG_QCOM_GDSC=y\" \\\n  \"CONFIG_DEBUG_FS=y\" \\\n  >> .config\n\nmake ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-\
+        \ \\\n  LLVM=/usr/bin LD=/usr/bin/ld.lld \\\n  olddefconfig\n\nmake -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-\
+        \ \\\n  LLVM=/usr/bin LD=/usr/bin/ld.lld \\\n  M=drivers/gpu/drm/msm \\\n  M=drivers/net/wireless/ath/ath11k \\\n\
+        \  M=drivers/input/touchscreen \\\n  M=drivers/bluetooth \\\n  modules\n\nmake ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-\
+        \ \\\n  INSTALL_MOD_PATH=${{ env.WORKSPACE }}/modules modules_install"
+    - name: Build Device Tree
+      run: "cd ${{ env.WORKSPACE }}\ngit clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \\\n  https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git\
+        \ linux-${{ env.KERNEL_VERSION }} 2>/dev/null || true\ncd linux-${{ env.KERNEL_VERSION }}\n\nmkdir -p arch/arm64/boot/dts/qcom\n\
+        cp -r ../${{ env.WORKSPACE }}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/\n\
+        \necho 'dtb-$(CONFIG_ARCH_QCOM) += sm8635-peridot.dtb' >> arch/arm64/boot/dts/qcom/Makefile\n\nmake ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-\
+        \ \\\n  LLVM=/usr/bin LD=/usr/bin/ld.lld \\\n  dtbs\n\nsed -i '/sm8635-peridot.dtb/d' arch/arm64/boot/dts/qcom/Makefile\n\
+        \ncp arch/arm64/boot/dts/qcom/sm8635-peridot.dtb ../peridot.dtb"
+    - name: Build initrd
+      run: "cd ${{ env.WORKSPACE }}\n\nINITRD_DIR=$(mktemp -d)\nmkdir -p $INITRD_DIR/{bin,sbin,etc,lib,lib64,usr/bin,usr/sbin,usr/lib,usr/lib64,proc,sys,dev,run,thermal}\n\
+        \ncp ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-guard.py $INITRD_DIR/thermal/\n\
+        cp ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-watchdog.py $INITRD_DIR/thermal/\n\
+        \nKVER=$(ls modules/lib/modules/ 2>/dev/null | head -1)\nif [ -n \"$KVER\" ]; then\n  cp -r modules/lib/modules/$KVER\
+        \ $INITRD_DIR/lib/modules/\nfi\n\nmkdir -p $INITRD_DIR/lib/firmware\ncp -r firmware/* $INITRD_DIR/lib/firmware/\n\n\
+        # Write init script using printf (no heredoc)\nprintf \"%s\\n\" \\\n  \"#!/bin/busybox sh\" \\\n  \"mount -t proc\
+        \ none /proc\" \\\n  \"mount -t sysfs none /sys\" \\\n  \"mount -t devtmpfs none /dev\" \\\n  \"mount -t tmpfs none\
+        \ /run\" \\\n  \"\" \\\n  \"modprobe qcom_tsens\" \\\n  \"modprobe qcom_spmi_temp_alarm\" \\\n  \"\" \\\n  \"/thermal/thermal-guard.py\
+        \ &\" \\\n  \"/thermal/thermal-watchdog.py &\" \\\n  \"\" \\\n  \"modprobe msm_drm\" \\\n  \"modprobe panel_xiaomi_peridot\"\
+        \ \\\n  \"modprobe goodix\" \\\n  \"modprobe ath11k_pci\" \\\n  \"modprobe hci_uart\" \\\n  \"modprobe qca\" \\\n\
+        \  \"\" \\\n  \"exec /sbin/init\" \\\n  > $INITRD_DIR/init\nchmod +x $INITRD_DIR/init\n\ncd $INITRD_DIR\nfind . -print0\
+        \ | cpio --null -ov --format=newc | gzip -9 > ${{ env.WORKSPACE }}/initrd.img"
+    - name: Build FAT media image
+      run: "cd ${{ env.WORKSPACE }}\n\nSTAGE_DIR=$(mktemp -d)\n\nfor d in boot modules firmware armada arch steam thermal;\
+        \ do\n  mkdir -p $STAGE_DIR/$d\ndone\n\ncp Image $STAGE_DIR/boot/\ncp initrd.img $STAGE_DIR/boot/\ncp peridot.dtb\
+        \ $STAGE_DIR/boot/\n\nKVER=$(ls modules/lib/modules/ 2>/dev/null | head -1)\nif [ -n \"$KVER\" ]; then\n  cp -r modules/lib/modules/$KVER/*\
+        \ $STAGE_DIR/modules/\nfi\n\ncp -r firmware/* $STAGE_DIR/firmware/\n\n# Write boot.conf using printf\nprintf \"%s\\\
+        n\" \\\n  \"# Peridot Armada Boot Configuration\" \\\n  \"KERNEL=Image\" \\\n  \"INITRD=initrd.img\" \\\n  \"DTB=peridot.dtb\"\
+        \ \\\n  \"BOOTARGS=console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0x888000 bootcpu=7 cpus=8 cpufreq=1 fb_hz=120\
+        \ fb_threads=6 touch_no_rpmh=1 touch_poll_us=4000 thermal=2 metal=1\" \\\n  > $STAGE_DIR/boot/boot.conf\n\ncp -r ${{\
+        \ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/* $STAGE_DIR/thermal/\n\nMEDIA_SIZE_MB=2048\n\
+        SECTOR_SIZE=512\nsectors=$((MEDIA_SIZE_MB * 1024 * 1024 / SECTOR_SIZE))\n\ndd if=/dev/zero of=peridot-media.img bs=$SECTOR_SIZE\
+        \ count=$sectors\nmkfs.vfat -F 32 -n PERIDOT peridot-media.img\n\nMNT_DIR=$(mktemp -d)\nsudo mount -o loop,uid=1000,gid=1000\
+        \ peridot-media.img $MNT_DIR\ncp -r $STAGE_DIR/* $MNT_DIR/\nsudo umount $MNT_DIR\n\ncp peridot-media.img ${{ env.WORKSPACE\
+        \ }}/"
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: armada-peridot-initrd-media
+        path: '${{ env.WORKSPACE }}/initrd.img
 
-      - name: Setup build environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            bc \
-            bison \
-            flex \
-            libssl-dev \
-            libelf-dev \
-            dwarves \
-            python3 \
-            python3-venv \
-            git \
-            wget \
-            curl \
-            xz-utils \
-            cpio \
-            device-tree-compiler \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            llvm \
-            lld \
-            clang \
-            android-sdk-platform-tools-common
+          ${{ env.WORKSPACE }}/peridot.dtb
 
-      - name: Create workspace directories
-        run: |
-          mkdir -p ${{ env.WORKSPACE }}/firmware
-          mkdir -p ${{ env.WORKSPACE }}/kernel-headers
+          ${{ env.WORKSPACE }}/peridot-media.img'
+        retention-days: 30
+    - name: Create release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: armada-peridot-initrd-${{ github.run_number }}
+        name: 'Armada-Dodge Peridot Initrd & Media #${{ github.run_number }}'
+        body: 'Build artifacts for Xiaomi Peridot (POCO F6 / Redmi Turbo 3) - SM8635
 
-      - name: Copy firmware to workspace
-        run: |
-          cp -r firmware/* ${{ env.WORKSPACE }}/firmware/
-          ls -la ${{ env.WORKSPACE }}/firmware/
 
-      - name: Download kernel modules artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: armada-peridot-build
-          path: ${{ env.WORKSPACE }}/artifacts
-        continue-on-error: true
+          Artifacts:
 
-      - name: Extract kernel modules if available
-        run: |
-          if [ -d "${{ env.WORKSPACE }}/artifacts/lib/modules" ]; then
-            cp -r ${{ env.WORKSPACE }}/artifacts/lib/modules/* ${{ env.WORKSPACE }}/
-          elif [ -d "${{ env.WORKSPACE }}/artifacts/modules" ]; then
-            cp -r ${{ env.WORKSPACE }}/artifacts/modules/* ${{ env.WORKSPACE }}/
-          else
-            echo "No pre-built modules found, will need to build them"
-          fi
+          - initrd.img (Initramfs with thermal guard)
 
-      - name: Build kernel modules (if needed)
-        if: ${{ !exists('${{ env.WORKSPACE }}/modules') }}
-        run: |
-          cd ${{ env.WORKSPACE }}
-          git clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \
-            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-${{ env.KERNEL_VERSION }}
-          cd linux-${{ env.KERNEL_VERSION }}
-          
-          # Apply Peridot patches
-          if [ -f ../${{ env.WORKSPACE }}/armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch ]; then
-            git apply ../${{ env.WORKSPACE }}/armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch || echo "GPU patch may need manual apply"
-          fi
-          
-          for patch in ../${{ env.WORKSPACE }}/armada-dodge-peridot/patches/armada/*.patch; do
-            [ -f "$patch" ] && git apply "$patch" 2>/dev/null || echo "Patch $(basename $patch) skipped"
-          done
-          
-          # Configure and build modules
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=/usr/bin LD=/usr/bin/ld.lld \
-            defconfig
-          
-          cat >> .config << 'EOF'
-CONFIG_DRM_MSM=y
-CONFIG_DRM_MSM_ADRENO=y
-CONFIG_DRM_MSM_ADRENO_A7XX=y
-CONFIG_DRM_MSM_DSI=y
-CONFIG_DRM_MSM_DSI_DSC=y
-CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=y
-CONFIG_DRM_PANEL_XIAOMI_PERIDOT=m
-CONFIG_TOUCHSCREEN_GOODIX=m
-CONFIG_TOUCHSCREEN_GOODIX_SPI=m
-CONFIG_ATH11K=m
-CONFIG_ATH11K_PCI=m
-CONFIG_BT_HCIUART=m
-CONFIG_BT_HCIUART_H4=y
-CONFIG_BT_HCIUART_QCA=y
-CONFIG_BT_QCA=m
-CONFIG_QCOM_TSENS=y
-CONFIG_QCOM_SPMI_TEMP_ALARM=y
-CONFIG_QCOM_SCMI=y
-CONFIG_QCOM_CPR=y
-CONFIG_QCOM_RPMH=y
-CONFIG_QCOM_GDSC=y
-CONFIG_DEBUG_FS=y
-EOF
-          
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=/usr/bin LD=/usr/bin/ld.lld \
-            olddefconfig
-          
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=/usr/bin LD=/usr/bin/ld.lld \
-            M=drivers/gpu/drm/msm \
-            M=drivers/net/wireless/ath/ath11k \
-            M=drivers/input/touchscreen \
-            M=drivers/bluetooth \
-            modules
-          
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            INSTALL_MOD_PATH=${{ env.WORKSPACE }}/modules modules_install
+          - peridot.dtb (Device tree)
 
-      - name: Build Device Tree
-        run: |
-          cd ${{ env.WORKSPACE }}
-          git clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \
-            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-${{ env.KERNEL_VERSION }} 2>/dev/null || true
-          cd linux-${{ env.KERNEL_VERSION }}
-          
-          mkdir -p arch/arm64/boot/dts/qcom
-          cp -r ../${{ env.WORKSPACE }}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/
-          
-          echo 'dtb-$(CONFIG_ARCH_QCOM) += sm8635-peridot.dtb' >> arch/arm64/boot/dts/qcom/Makefile
-          
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=/usr/bin LD=/usr/bin/ld.lld \
-            dtbs
-          
-          sed -i '/sm8635-peridot.dtb/d' arch/arm64/boot/dts/qcom/Makefile
-          
-          cp arch/arm64/boot/dts/qcom/sm8635-peridot.dtb ../peridot.dtb
+          - peridot-media.img (2GB FAT32 media with userspace)'
+        files: '${{ env.WORKSPACE }}/initrd.img
 
-      - name: Build initrd
-        run: |
-          cd ${{ env.WORKSPACE }}
-          
-          INITRD_DIR=$(mktemp -d)
-          mkdir -p $INITRD_DIR/{bin,sbin,etc,lib,lib64,usr/bin,usr/sbin,usr/lib,usr/lib64,proc,sys,dev,run,thermal}
-          
-          cp ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-guard.py $INITRD_DIR/thermal/
-          cp ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-watchdog.py $INITRD_DIR/thermal/
-          
-          KVER=$(ls modules/lib/modules/ 2>/dev/null | head -1)
-          if [ -n "$KVER" ]; then
-            cp -r modules/lib/modules/$KVER $INITRD_DIR/lib/modules/
-          fi
-          
-          mkdir -p $INITRD_DIR/lib/firmware
-          cp -r firmware/* $INITRD_DIR/lib/firmware/
-          
-          printf "%s\n" \
-            "#!/bin/busybox sh" \
-            "mount -t proc none /proc" \
-            "mount -t sysfs none /sys" \
-            "mount -t devtmpfs none /dev" \
-            "mount -t tmpfs none /run" \
-            "" \
-            "modprobe qcom_tsens" \
-            "modprobe qcom_spmi_temp_alarm" \
-            "" \
-            "/thermal/thermal-guard.py &" \
-            "/thermal/thermal-watchdog.py &" \
-            "" \
-            "modprobe msm_drm" \
-            "modprobe panel_xiaomi_peridot" \
-            "modprobe goodix" \
-            "modprobe ath11k_pci" \
-            "modprobe hci_uart" \
-            "modprobe qca" \
-            "" \
-            "exec /sbin/init" \
-            > $INITRD_DIR/init
-          chmod +x $INITRD_DIR/init
-          
-          cd $INITRD_DIR
-          find . -print0 | cpio --null -ov --format=newc | gzip -9 > ${{ env.WORKSPACE }}/initrd.img
+          ${{ env.WORKSPACE }}/peridot.dtb
 
-      - name: Build FAT media image
-        run: |
-          cd ${{ env.WORKSPACE }}
-          
-          STAGE_DIR=$(mktemp -d)
-          
-          for d in boot modules firmware armada arch steam thermal; do
-            mkdir -p $STAGE_DIR/$d
-          done
-          
-          cp Image $STAGE_DIR/boot/
-          cp initrd.img $STAGE_DIR/boot/
-          cp peridot.dtb $STAGE_DIR/boot/
-          
-          KVER=$(ls modules/lib/modules/ 2>/dev/null | head -1)
-          if [ -n "$KVER" ]; then
-            cp -r modules/lib/modules/$KVER/* $STAGE_DIR/modules/
-          fi
-          
-          cp -r firmware/* $STAGE_DIR/firmware/
-          
-          printf "%s\n" \
-            "# Peridot Armada Boot Configuration" \
-            "KERNEL=Image" \
-            "INITRD=initrd.img" \
-            "DTB=peridot.dtb" \
-            "BOOTARGS=console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0x888000 bootcpu=7 cpus=8 cpufreq=1 fb_hz=120 fb_threads=6 touch_no_rpmh=1 touch_poll_us=4000 thermal=2 metal=1" \
-            > $STAGE_DIR/boot/boot.conf
-          
-          cp -r ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/* $STAGE_DIR/thermal/
-          
-          MEDIA_SIZE_MB=2048
-          SECTOR_SIZE=512
-          sectors=$((MEDIA_SIZE_MB * 1024 * 1024 / SECTOR_SIZE))
-          
-          dd if=/dev/zero of=peridot-media.img bs=$SECTOR_SIZE count=$sectors
-          mkfs.vfat -F 32 -n PERIDOT peridot-media.img
-          
-          MNT_DIR=$(mktemp -d)
-          sudo mount -o loop,uid=1000,gid=1000 peridot-media.img $MNT_DIR
-          cp -r $STAGE_DIR/* $MNT_DIR/
-          sudo umount $MNT_DIR
-          
-          cp peridot-media.img ${{ env.WORKSPACE }}/
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: armada-peridot-initrd-media
-          path: |
-            ${{ env.WORKSPACE }}/initrd.img
-            ${{ env.WORKSPACE }}/peridot.dtb
-            ${{ env.WORKSPACE }}/peridot-media.img
-          retention-days: 30
-
-      - name: Create release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: armada-peridot-initrd-${{ github.run_number }}
-          name: "Armada-Dodge Peridot Initrd & Media #${{ github.run_number }}"
-          body: |
-            Build artifacts for Xiaomi Peridot (POCO F6 / Redmi Turbo 3) - SM8635
-            
-            Artifacts:
-            - initrd.img (Initramfs with thermal guard)
-            - peridot.dtb (Device tree)
-            - peridot-media.img (2GB FAT32 media with userspace)
-          files: |
-            ${{ env.WORKSPACE }}/initrd.img
-            ${{ env.WORKSPACE }}/peridot.dtb
-            ${{ env.WORKSPACE }}/peridot-media.img
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ${{ env.WORKSPACE }}/peridot-media.img'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
