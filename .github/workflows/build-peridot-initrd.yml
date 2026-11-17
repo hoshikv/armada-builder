@@ -61,7 +61,7 @@ jobs:
         \ ${{ env.WORKSPACE }}/\nelif [ -d \"${{ env.WORKSPACE }}/artifacts/modules\" ]; then\n  cp -r ${{ env.WORKSPACE }}/artifacts/modules/*\
         \ ${{ env.WORKSPACE }}/ \nelse\n  echo \"No pre-built modules found, will need to build them\"\nfi"
     - name: Build kernel modules (if needed)
-      if: ${{ !exists('${{ env.WORKSPACE }}/modules') }}
+      if: ${{ always() }}
       run: "cd ${{ env.WORKSPACE }}\ngit clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \\\n  https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git\
         \ linux-${{ env.KERNEL_VERSION }}\ncd linux-${{ env.KERNEL_VERSION }}\n\n# Apply Peridot patches\nif [ -f ../${{ env.WORKSPACE\
         \ }}/armada-dodge-peridot/patches/armada/0049-drm-msm-add-adreno-735-peridot.patch ]; then\n  git apply ../${{ env.WORKSPACE\
