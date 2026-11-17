@@ -1,192 +1,130 @@
 name: Build Peridot Initrd & Media (Skip Kernel)
 
-"on":
+on:
   workflow_dispatch:
     inputs:
       kernel_run_id:
-        description: 'Run ID of the kernel build to download artifact from'
+        description: 'Run ID of a full build (empty = latest successful full build)'
+        required: false
+        default: ''
+      media_size_mb:
+        description: 'FAT media image size in MB'
         required: true
-        default: '43994070406'
+        default: '2048'
+
+concurrency:
+  group: armada-peridot-initrd-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   WORKSPACE: ${{ github.workspace }}/peridot-workspace
-  KERNEL_VERSION: '6.12'
+  MEDIA_SIZE_MB: ${{ github.event.inputs.media_size_mb || '2048' }}
+  BOOTARGS: console=ttyMSM0,115200n8 earlycon loglevel=7 ignore_loglevel
 
 jobs:
   build-initrd-media:
-    name: Build Initrd & FAT Media
+    name: Build Initrd, Boot Image & FAT Media
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: write
+      actions: read
       packages: write
 
     steps:
-      - name: Checkout armada-dodge-peridot
+      - name: Checkout builder
+        uses: actions/checkout@v4
+
+      - name: Checkout armada-peridot
         uses: actions/checkout@v4
         with:
           repository: hoshikv/armada-peridot
           token: ${{ secrets.GITHUB_TOKEN }}
           path: ${{ env.WORKSPACE }}/armada-dodge-peridot
 
-      - name: Checkout firmware
-        uses: actions/checkout@v4
-        with:
-          path: firmware
-
-      - name: Download kernel artifact from artifact API
-        run: |
-          cd ${{ env.WORKSPACE }}
-          curl -L \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            -o armada-peridot-kernel.zip \
-            "https://api.github.com/repos/hoshikv/armada-builder/actions/artifacts/14286656897/zip"
-          unzip armada-peridot-kernel.zip
-          ls -la
-
-      - name: Verify kernel artifact
-        run: |
-          ls -la ${{ env.WORKSPACE }}/
-          test -f ${{ env.WORKSPACE }}/Image
-
-      - name: Download DTB from repo
-        run: |
-          cd ${{ env.WORKSPACE }}
-          gh release download peridot-dtb-1794881998 --repo hoshikv/armada-builder --pattern "*.dtb"
-          ls -la peridot.dtb
-
-      - name: Verify kernel artifact
-        run: |
-          ls -la ${{ env.WORKSPACE }}/
-          test -f ${{ env.WORKSPACE }}/Image
-          test -f ${{ env.WORKSPACE }}/peridot.dtb
-
       - name: Setup build environment
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential \
-            bc \
-            bison \
-            flex \
-            libssl-dev \
-            libelf-dev \
-            dwarves \
-            python3 \
-            python3-venv \
-            git \
-            wget \
-            curl \
-            xz-utils \
-            cpio \
-            device-tree-compiler \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            llvm \
-            lld \
-            clang \
-            android-sdk-platform-tools-common
+            git curl xz-utils cpio gzip device-tree-compiler \
+            busybox-static kmod mtools dosfstools mkbootimg
+          mkdir -p ${{ env.WORKSPACE }}/artifact
 
-      - name: Create workspace directories
+      - name: Download kernel build artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p ${{ env.WORKSPACE }}/firmware
-          mkdir -p ${{ env.WORKSPACE }}/kernel-headers
+          RUN_ID="${{ github.event.inputs.kernel_run_id }}"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh run list --repo "${GITHUB_REPOSITORY}" \
+              --workflow build-armada-peridot.yml --status success \
+              --limit 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          echo "kernel run: $RUN_ID"
+          gh run download "$RUN_ID" --repo "${GITHUB_REPOSITORY}" \
+            -n armada-peridot-kernel -D ${{ env.WORKSPACE }}/artifact
+          ls -la ${{ env.WORKSPACE }}/artifact
+          test -f ${{ env.WORKSPACE }}/artifact/Image
+          test -f ${{ env.WORKSPACE }}/artifact/peridot.dtb
+          test -f ${{ env.WORKSPACE }}/artifact/kernel-modules.tar.gz
 
-      - name: Copy firmware to workspace
-        run: |
-          cp -r firmware/* ${{ env.WORKSPACE }}/firmware/
-          ls -la ${{ env.WORKSPACE }}/firmware/
-
-      - name: Build initrd
+      - name: Extract artifacts
         run: |
           cd ${{ env.WORKSPACE }}
-          
-          INITRD_DIR=$(mktemp -d)
-          mkdir -p $INITRD_DIR/{bin,sbin,etc,lib,lib64,usr/bin,usr/sbin,usr/lib,usr/lib64,proc,sys,dev,run,thermal}
-          
-          cp ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-guard.py $INITRD_DIR/thermal/
-          cp ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/thermal-watchdog.py $INITRD_DIR/thermal/
-          
-          mkdir -p $INITRD_DIR/lib/firmware
-          cp -r firmware/* $INITRD_DIR/lib/firmware/
-          
-          printf "%s\n" \
-            "#!/bin/busybox sh" \
-            "mount -t proc none /proc" \
-            "mount -t sysfs none /sys" \
-            "mount -t devtmpfs none /dev" \
-            "mount -t tmpfs none /run" \
-            "" \
-            "modprobe qcom_tsens" \
-            "modprobe qcom_spmi_temp_alarm" \
-            "" \
-            "/thermal/thermal-guard.py &" \
-            "/thermal/thermal-watchdog.py &" \
-            "" \
-            "modprobe msm_drm" \
-            "modprobe panel_xiaomi_peridot" \
-            "modprobe goodix" \
-            "modprobe ath11k_pci" \
-            "modprobe hci_uart" \
-            "modprobe qca" \
-            "" \
-            "exec /sbin/init" \
-            > $INITRD_DIR/init
-          chmod +x $INITRD_DIR/init
-          
-          cd $INITRD_DIR
-          find . -print0 | cpio --null -ov --format=newc | gzip -9 > ${{ env.WORKSPACE }}/initrd.img
+          mv artifact/Image artifact/peridot.dtb artifact/kernel-modules.tar.gz .
+          mkdir -p modules
+          tar -C modules -xzf kernel-modules.tar.gz
+          KVER=$(ls modules/lib/modules/ | head -1)
+          echo "KVER=$KVER"
+
+      - name: Copy firmware
+        run: |
+          mkdir -p ${{ env.WORKSPACE }}/firmware
+          cp -a firmware/. ${{ env.WORKSPACE }}/firmware/
+
+      - name: Build initramfs
+        run: |
+          bash scripts/build-initramfs.sh \
+            --modules-dir ${{ env.WORKSPACE }}/modules \
+            --firmware-dir ${{ env.WORKSPACE }}/firmware \
+            --thermal-dir ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1 \
+            --module-mode minimal \
+            --output ${{ env.WORKSPACE }}/initrd.img
+
+      - name: Build fastboot boot image
+        run: |
+          bash scripts/make-bootimg.sh \
+            --kernel ${{ env.WORKSPACE }}/Image \
+            --initrd ${{ env.WORKSPACE }}/initrd.img \
+            --dtb ${{ env.WORKSPACE }}/peridot.dtb \
+            --cmdline "${{ env.BOOTARGS }}" \
+            --output ${{ env.WORKSPACE }}/peridot-boot.img
 
       - name: Build FAT media image
         run: |
-          cd ${{ env.WORKSPACE }}
-          
-          STAGE_DIR=$(mktemp -d)
-          
-          for d in boot modules firmware armada arch steam thermal; do
-            mkdir -p $STAGE_DIR/$d
-          done
-          
-          cp Image $STAGE_DIR/boot/
-          cp initrd.img $STAGE_DIR/boot/
-          cp peridot.dtb $STAGE_DIR/boot/
-          
-          cp -r firmware/* $STAGE_DIR/firmware/
-          
-          printf "%s\n" \
-            "# Peridot Armada Boot Configuration" \
-            "KERNEL=Image" \
-            "INITRD=initrd.img" \
-            "DTB=peridot.dtb" \
-            "BOOTARGS=console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0x888000 bootcpu=7 cpus=8 cpufreq=1 fb_hz=120 fb_threads=6 touch_no_rpmh=1 touch_poll_us=4000 thermal=2 metal=1" \
-            > $STAGE_DIR/boot/boot.conf
-          
-          cp -r ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1/* $STAGE_DIR/thermal/
-          
-          MEDIA_SIZE_MB=2048
-          SECTOR_SIZE=512
-          sectors=$((MEDIA_SIZE_MB * 1024 * 1024 / SECTOR_SIZE))
-          
-          dd if=/dev/zero of=peridot-media.img bs=$SECTOR_SIZE count=$sectors
-          mkfs.vfat -F 32 -n PERIDOT peridot-media.img
-          
-          MNT_DIR=$(mktemp -d)
-          sudo mount -o loop,uid=1000,gid=1000 peridot-media.img $MNT_DIR
-          cp -r $STAGE_DIR/* $MNT_DIR/
-          sudo umount $MNT_DIR
-          
-          cp peridot-media.img ${{ env.WORKSPACE }}/
+          bash scripts/make-media.sh \
+            --image ${{ env.WORKSPACE }}/Image \
+            --initrd ${{ env.WORKSPACE }}/initrd.img \
+            --dtb ${{ env.WORKSPACE }}/peridot.dtb \
+            --modules-dir ${{ env.WORKSPACE }}/modules \
+            --firmware-dir ${{ env.WORKSPACE }}/firmware \
+            --thermal-dir ${{ env.WORKSPACE }}/armada-dodge-peridot/experimental/peridot-thermal-v1 \
+            --armada-root ${{ env.WORKSPACE }}/armada-root \
+            --arch-root ${{ env.WORKSPACE }}/arch-root \
+            --steam-extra ${{ env.WORKSPACE }}/steam-extra \
+            --size-mb ${{ env.MEDIA_SIZE_MB }} \
+            --output ${{ env.WORKSPACE }}/peridot-media.img
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: armada-peridot-initrd-media
           path: |
-            ${{ env.WORKSPACE }}/initrd.img
             ${{ env.WORKSPACE }}/peridot.dtb
+            ${{ env.WORKSPACE }}/initrd.img
+            ${{ env.WORKSPACE }}/peridot-boot.img
             ${{ env.WORKSPACE }}/peridot-media.img
-          retention-days: 30
+          retention-days: 14
 
       - name: Create release
         uses: softprops/action-gh-release@v1
@@ -195,14 +133,16 @@ jobs:
           name: "Armada-Dodge Peridot Initrd & Media #${{ github.run_number }}"
           body: |
             Build artifacts for Xiaomi Peridot (POCO F6 / Redmi Turbo 3) - SM8635
-            
+
             Artifacts:
-            - initrd.img (Initramfs with thermal guard)
-            - peridot.dtb (Device tree)
-            - peridot-media.img (2GB FAT32 media with userspace)
+            - peridot.dtb
+            - initrd.img (busybox + modules + firmware)
+            - peridot-boot.img (flashless `fastboot boot` image)
+            - peridot-media.img (FAT32 RAM media)
           files: |
-            ${{ env.WORKSPACE }}/initrd.img
             ${{ env.WORKSPACE }}/peridot.dtb
+            ${{ env.WORKSPACE }}/initrd.img
+            ${{ env.WORKSPACE }}/peridot-boot.img
             ${{ env.WORKSPACE }}/peridot-media.img
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
