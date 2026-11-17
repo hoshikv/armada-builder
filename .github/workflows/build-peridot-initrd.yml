@@ -4,7 +4,7 @@ name: Build Peridot Initrd & Media (Skip Kernel)
   workflow_dispatch:
     inputs:
       kernel_run_id:
-        description: 'Run ID of the kernel build to download artifacts from'
+        description: 'Run ID of the kernel build to download artifact from'
         required: true
         default: '43994070406'
 
@@ -34,18 +34,18 @@ jobs:
         with:
           path: firmware
 
-      - name: Download kernel + DTB artifacts from specific run
+      - name: Download kernel artifact from specific run
         uses: actions/download-artifact@v4
         with:
+          name: armada-peridot-kernel
           path: ${{ env.WORKSPACE }}
           repository: hoshikv/armada-builder
-          run-id: 43985144171
+          run-id: ${{ github.event.inputs.kernel_run_id }}
 
-      - name: Verify artifacts
+      - name: Verify kernel artifact
         run: |
           ls -la ${{ env.WORKSPACE }}/
           test -f ${{ env.WORKSPACE }}/Image
-          test -f ${{ env.WORKSPACE }}/peridot.dtb
 
       - name: Setup build environment
         run: |
@@ -82,6 +82,26 @@ jobs:
         run: |
           cp -r firmware/* ${{ env.WORKSPACE }}/firmware/
           ls -la ${{ env.WORKSPACE }}/firmware/
+
+      - name: Build Device Tree
+        run: |
+          cd ${{ env.WORKSPACE }}
+          git clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \
+            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-${{ env.KERNEL_VERSION }} 2>/dev/null || true
+          cd linux-${{ env.KERNEL_VERSION }}
+          
+          mkdir -p arch/arm64/boot/dts/qcom
+          cp -r ../${{ env.WORKSPACE }}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/
+          
+          echo 'dtb-$(CONFIG_ARCH_QCOM) += sm8635-peridot.dtb' >> arch/arm64/boot/dts/qcom/Makefile
+          
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            LLVM=/usr/bin LD=/usr/bin/ld.lld \
+            dtbs
+          
+          sed -i '/sm8635-peridot.dtb/d' arch/arm64/boot/dts/qcom/Makefile
+          
+          cp arch/arm64/boot/dts/qcom/sm8635-peridot.dtb ../peridot.dtb
 
       - name: Build initrd
         run: |
