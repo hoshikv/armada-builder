@@ -34,10 +34,14 @@ jobs:
         with:
           path: firmware
 
-      - name: Download kernel artifact from release
+      - name: Download kernel artifact from artifact API
         run: |
           cd ${{ env.WORKSPACE }}
-          gh release download armada-peridot-kernel-14286656897 --repo hoshikv/armada-builder --pattern "*.zip"
+          curl -L \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -o armada-peridot-kernel.zip \
+            "https://api.github.com/repos/hoshikv/armada-builder/actions/artifacts/14286656897/zip"
           unzip armada-peridot-kernel.zip
           ls -la
 
