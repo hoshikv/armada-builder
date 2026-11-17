@@ -173,7 +173,8 @@ jobs:
           
           MNT_DIR=$(mktemp -d)
           sudo mount -o loop,uid=1000,gid=1000 peridot-media.img $MNT_DIR
-          cp -r $STAGE_DIR/* $MNT_DIR/
+          sudo chown -R 1000:1000 $MNT_DIR
+          rsync -a $STAGE_DIR/ $MNT_DIR/
           sudo umount $MNT_DIR
           
           cp peridot-media.img ${{ env.WORKSPACE }}/
