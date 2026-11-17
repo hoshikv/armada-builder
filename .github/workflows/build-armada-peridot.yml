@@ -78,6 +78,16 @@ jobs:
           fdtput -t s ${{ env.WORKSPACE }}/peridot.dtb /chosen bootargs "${{ env.BOOTARGS }}"
           fdtput -d ${{ env.WORKSPACE }}/peridot.dtb /chosen linux,initrd-start || true
           fdtput -d ${{ env.WORKSPACE }}/peridot.dtb /chosen linux,initrd-end || true
+          # RAM boot: keep the mainline kernel away from storage/GPU blocks that
+          # ABL already initialized from the Android side.
+          for node in \
+            /soc/ufshc@1d84000 \
+            /soc/ufsphy_mem@1d80000 \
+            /soc/qcom,kgsl-3d0@3d00000 \
+            /soc/kgsl-smmu@3da0000 \
+            /soc/qcom,kgsl-iommu@3da0000; do
+            fdtput -t s ${{ env.WORKSPACE }}/peridot.dtb "$node" status disabled 2>/dev/null || true
+          done
           dtc -I dtb -O dts ${{ env.WORKSPACE }}/peridot.dtb >/dev/null
           dtc -I dtb -O dts ${{ env.WORKSPACE }}/peridot.dtb 2>/dev/null \
             | grep -A2 '/chosen' | head -10
