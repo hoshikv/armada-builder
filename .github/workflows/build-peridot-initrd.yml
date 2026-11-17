@@ -6,7 +6,7 @@ name: Build Peridot Initrd & Media (Skip Kernel)
       kernel_run_id:
         description: 'Run ID of the kernel build to download artifact from'
         required: true
-        default: '43983948179'
+        default: '43994070406'
 
 env:
   WORKSPACE: ${{ github.workspace }}/peridot-workspace
@@ -34,12 +34,12 @@ jobs:
         with:
           path: firmware
 
-      - name: Download kernel artifact from specific run
-        uses: actions/download-artifact@v4
-        with:
-          path: ${{ env.WORKSPACE }}
-          repository: hoshikv/armada-builder
-          artifact-ids: 14286656897
+      - name: Download kernel artifact from release
+        run: |
+          cd ${{ env.WORKSPACE }}
+          gh release download armada-peridot-kernel-14286656897 --repo hoshikv/armada-builder --pattern "*.zip"
+          unzip armada-peridot-kernel.zip
+          ls -la
 
       - name: Verify kernel artifact
         run: |
