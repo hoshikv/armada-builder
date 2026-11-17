@@ -16,7 +16,7 @@ jobs:
   build-initrd-media:
     name: Build Initrd & FAT Media
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     permissions:
       contents: write
       packages: write
