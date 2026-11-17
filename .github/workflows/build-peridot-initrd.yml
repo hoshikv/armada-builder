@@ -6,7 +6,7 @@ name: Build Peridot Initrd & Media (Skip Kernel)
       kernel_run_id:
         description: 'Run ID of the kernel build to download artifact from'
         required: true
-        default: '43994070406'
+        default: '43983948179'
 
 env:
   WORKSPACE: ${{ github.workspace }}/peridot-workspace
