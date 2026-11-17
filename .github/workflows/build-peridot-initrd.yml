@@ -40,7 +40,7 @@ jobs:
           name: armada-peridot-kernel
           path: ${{ env.WORKSPACE }}
           repository: hoshikv/armada-builder
-          run-id: 43983948179
+          artifact-ids: 14286656897
 
       - name: Verify kernel artifact
         run: |
