@@ -85,8 +85,16 @@ jobs:
       - name: Clone Linux kernel
         run: |
           cd ${{ env.WORKSPACE }}
-          git clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \
-            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-${{ env.KERNEL_VERSION }}
+          for attempt in 1 2 3; do
+            if git clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \
+                 https://github.com/torvalds/linux.git linux-${{ env.KERNEL_VERSION }}; then
+              break
+            fi
+            rm -rf linux-${{ env.KERNEL_VERSION }}
+            echo "clone attempt $attempt failed; retrying"
+            sleep 15
+          done
+          test -d linux-${{ env.KERNEL_VERSION }}/arch/arm64
 
       - name: Apply Peridot patches
         run: |

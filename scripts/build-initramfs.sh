@@ -55,10 +55,10 @@ if ! APPLETS="$("$ROOT/bin/busybox" --list 2>/dev/null)"; then
              switch_root poweroff reboot mdev chmod chown find xargs cp mv rm
              gzip gunzip tar sync blkid fdisk"
 fi
-while IFS= read -r applet; do
+for applet in $APPLETS; do
     [ -n "$applet" ] || continue
     ln -sf /bin/busybox "$ROOT/bin/$applet"
-done <<< "$APPLETS"
+done
 
 # Kernel modules.
 KVER=""
@@ -127,8 +127,15 @@ mount -t devpts devpts /dev/pts 2>/dev/null || true
 mount -t tmpfs tmpfs /run 2>/dev/null || true
 mount -t tmpfs tmpfs /tmp 2>/dev/null || true
 
+pmsg() {
+    [ -w /dev/pmsg0 ] && printf '%s\n' "$*" > /dev/pmsg0 2>/dev/null || true
+}
+
 echo "=== Armada-Dodge Peridot initramfs ==="
 uname -a
+pmsg "=== peridot initramfs start ==="
+pmsg "kernel: $(uname -a)"
+pmsg "cmdline: $(cat /proc/cmdline)"
 [ -r /proc/device-tree/model ] && { echo -n "model: "; tr -d '\0' < /proc/device-tree/model; echo; }
 [ -r /proc/device-tree/compatible ] && { echo -n "compatible: "; tr '\0' ' ' < /proc/device-tree/compatible; echo; }
 
@@ -146,12 +153,17 @@ echo "--- block devices ---"
 ls -l /dev/block 2>/dev/null || true
 ls -l /dev/mmcblk* /dev/sd* /dev/nvme* 2>/dev/null || true
 
+dmesg > /dev/pmsg0 2>/dev/null || true
+pmsg "=== peridot initramfs end ==="
+
 if [ -x /sbin/init ]; then
     echo "starting /sbin/init"
+    pmsg "starting /sbin/init"
     exec /sbin/init
 fi
 
 echo "no /sbin/init in initramfs; starting rescue shell"
+pmsg "starting rescue shell"
 exec /bin/sh -i
 INIT
 chmod 755 "$ROOT/init"
