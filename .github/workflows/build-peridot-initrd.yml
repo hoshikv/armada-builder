@@ -39,7 +39,7 @@ jobs:
         with:
           path: ${{ env.WORKSPACE }}
           repository: hoshikv/armada-builder
-          artifact-ids: 14286544939
+          artifact-ids: 14286656897
 
       - name: Verify artifacts
         run: |
