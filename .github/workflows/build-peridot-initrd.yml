@@ -93,6 +93,10 @@ jobs:
             https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-${{ env.KERNEL_VERSION }} 2>/dev/null || true
           cd linux-${{ env.KERNEL_VERSION }}
           
+          # Copy dt-bindings headers for DT compilation
+          mkdir -p include/dt-bindings/arm
+          cp -r ${{ env.WORKSPACE }}/armada-dodge-peridot/source/linux/include/dt-bindings/arm/* include/dt-bindings/arm/ 2>/dev/null || true
+          
           mkdir -p arch/arm64/boot/dts/qcom
           cp -r ${{ env.WORKSPACE }}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/
           
