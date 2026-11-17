@@ -50,6 +50,18 @@ jobs:
           ls -la ${{ env.WORKSPACE }}/
           test -f ${{ env.WORKSPACE }}/Image
 
+      - name: Download DTB from repo
+        run: |
+          cd ${{ env.WORKSPACE }}
+          gh release download peridot-dtb-1794881998 --repo hoshikv/armada-builder --pattern "*.dtb"
+          ls -la peridot.dtb
+
+      - name: Verify kernel artifact
+        run: |
+          ls -la ${{ env.WORKSPACE }}/
+          test -f ${{ env.WORKSPACE }}/Image
+          test -f ${{ env.WORKSPACE }}/peridot.dtb
+
       - name: Setup build environment
         run: |
           sudo apt-get update
@@ -85,33 +97,6 @@ jobs:
         run: |
           cp -r firmware/* ${{ env.WORKSPACE }}/firmware/
           ls -la ${{ env.WORKSPACE }}/firmware/
-
-      - name: Build Device Tree
-        run: |
-          cd ${{ env.WORKSPACE }}
-          git clone --depth 1 --branch v${{ env.KERNEL_VERSION }} \
-            https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-${{ env.KERNEL_VERSION }} 2>/dev/null || true
-          cd linux-${{ env.KERNEL_VERSION }}
-          
-          # Copy dt-bindings headers from kernel source
-          mkdir -p include/dt-bindings/arm
-          cp -r include/dt-bindings/arm/* include/dt-bindings/arm/ 2>/dev/null || true
-          
-          mkdir -p arch/arm64/boot/dts/qcom
-          cp -r ${{ env.WORKSPACE }}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/
-          
-          echo 'dtb-$(CONFIG_ARCH_QCOM) += sm8635-peridot.dtb' >> arch/arm64/boot/dts/qcom/Makefile
-          
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=/usr/bin LD=/usr/bin/ld.lld \
-            defconfig
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=/usr/bin LD=/usr/bin/ld.lld \
-            dtbs
-          
-          sed -i '/sm8635-peridot.dtb/d' arch/arm64/boot/dts/qcom/Makefile
-          
-          cp arch/arm64/boot/dts/qcom/sm8635-peridot.dtb ../peridot.dtb
 
       - name: Build initrd
         run: |
