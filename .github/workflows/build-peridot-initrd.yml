@@ -90,7 +90,7 @@ jobs:
           cd linux-${{ env.KERNEL_VERSION }}
           
           mkdir -p arch/arm64/boot/dts/qcom
-          cp -r ../${{ env.WORKSPACE }}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/
+          cp -r ${{ env.WORKSPACE }}/armada-dodge-peridot/source/linux/arch/arm64/boot/dts/qcom/* arch/arm64/boot/dts/qcom/
           
           echo 'dtb-$(CONFIG_ARCH_QCOM) += sm8635-peridot.dtb' >> arch/arm64/boot/dts/qcom/Makefile
           
