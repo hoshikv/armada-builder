@@ -37,7 +37,6 @@ jobs:
       - name: Download kernel artifact from specific run
         uses: actions/download-artifact@v4
         with:
-          name: armada-peridot-kernel
           path: ${{ env.WORKSPACE }}
           repository: hoshikv/armada-builder
           artifact-ids: 14286656897
