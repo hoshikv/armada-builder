@@ -100,6 +100,9 @@ jobs:
           
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             LLVM=/usr/bin LD=/usr/bin/ld.lld \
+            defconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            LLVM=/usr/bin LD=/usr/bin/ld.lld \
             dtbs
           
           sed -i '/sm8635-peridot.dtb/d' arch/arm64/boot/dts/qcom/Makefile
